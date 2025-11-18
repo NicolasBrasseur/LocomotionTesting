@@ -75,6 +75,9 @@ namespace StarterAssets
         [Tooltip("For locking the camera position on all axis")]
         public bool LockCameraPosition = false;
 
+        //Custom members
+        public Vector3 LocalDown = Vector3.down;
+
         // cinemachine
         private float _cinemachineTargetYaw;
         private float _cinemachineTargetPitch;
@@ -147,6 +150,8 @@ namespace StarterAssets
 
             AssignAnimationIDs();
 
+            LocalDown = transform.up * -1.0f;
+
             // reset our timeouts on start
             _jumpTimeoutDelta = JumpTimeout;
             _fallTimeoutDelta = FallTimeout;
@@ -207,8 +212,10 @@ namespace StarterAssets
             _cinemachineTargetPitch = ClampAngle(_cinemachineTargetPitch, BottomClamp, TopClamp);
 
             // Cinemachine will follow this target
-            CinemachineCameraTarget.transform.rotation = Quaternion.Euler(_cinemachineTargetPitch + CameraAngleOverride,
+            Quaternion newCameraTargetRotation = Quaternion.Euler(_cinemachineTargetPitch + CameraAngleOverride,
                 _cinemachineTargetYaw, 0.0f);
+
+            CinemachineCameraTarget.transform.localRotation = newCameraTargetRotation;
         }
 
         private void Move()
@@ -256,20 +263,22 @@ namespace StarterAssets
             if (_input.move != Vector2.zero)
             {
                 _targetRotation = Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg +
-                                  _mainCamera.transform.eulerAngles.y;
-                float rotation = Mathf.SmoothDampAngle(transform.eulerAngles.y, _targetRotation, ref _rotationVelocity,
+                                  _mainCamera.transform.localEulerAngles.y;
+                float rotation = Mathf.SmoothDampAngle(transform.localEulerAngles.y, _targetRotation, ref _rotationVelocity,
                     RotationSmoothTime);
 
                 // rotate to face input direction relative to camera position
-                transform.rotation = Quaternion.Euler(0.0f, rotation, 0.0f);
+                //transform.localRotation = Quaternion.Euler(0.0f, rotation, 0.0f); //TODO: Fix rotation
             }
 
 
-            Vector3 targetDirection = Quaternion.Euler(0.0f, _targetRotation, 0.0f) * Vector3.forward;
+            Vector3 targetForwardDirection = Quaternion.Euler(0.0f, _targetRotation, 0.0f) * new Vector3(LocalDown.x, LocalDown.z, -LocalDown.y);
+            Vector3 targetUpDirection = - LocalDown;
+
 
             // move the player
-            _controller.Move(targetDirection.normalized * (_speed * Time.deltaTime) +
-                             new Vector3(0.0f, _verticalVelocity, 0.0f) * Time.deltaTime);
+            _controller.Move(targetForwardDirection.normalized * (_speed * Time.deltaTime) +
+                              targetUpDirection * _verticalVelocity * Time.deltaTime);
 
             // update animator if using character
             if (_hasAnimator)
