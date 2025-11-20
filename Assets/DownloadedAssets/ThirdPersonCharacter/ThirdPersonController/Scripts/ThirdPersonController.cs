@@ -9,8 +9,8 @@ using UnityEngine.InputSystem.XR;
 
 namespace StarterAssets
 {
-    //[RequireComponent(typeof(CharacterController))]
     [RequireComponent(typeof(Rigidbody))]
+    [RequireComponent(typeof(Collider))]
 #if ENABLE_INPUT_SYSTEM 
     [RequireComponent(typeof(PlayerInput))]
 #endif
@@ -85,8 +85,8 @@ namespace StarterAssets
         private Rigidbody _rigidbody;
 
         //Debug
-        private Vector3 _targetForward;
-        private Vector3 _targetPosition;
+        private Vector3 _targetForwardDebug;
+        private Vector3 _targetRotationDebug;
 
         // cinemachine
         private float _cinemachineTargetYaw;
@@ -115,7 +115,6 @@ namespace StarterAssets
         private PlayerInput _playerInput;
 #endif
         private Animator _animator;
-        //private CharacterController _controller;
         private StarterAssetsInputs _input;
         private GameObject _mainCamera;
 
@@ -150,7 +149,6 @@ namespace StarterAssets
             _cinemachineTargetYaw = CinemachineCameraTarget.transform.rotation.eulerAngles.y;
             
             _hasAnimator = TryGetComponent(out _animator);
-            //_controller = GetComponent<CharacterController>();
             _rigidbody = GetComponent<Rigidbody>();
             _input = GetComponent<StarterAssetsInputs>();
 #if ENABLE_INPUT_SYSTEM 
@@ -200,8 +198,7 @@ namespace StarterAssets
         private void GroundedCheck()
         {
             // set sphere position, with offset
-            Vector3 spherePosition = new Vector3(transform.position.x, transform.position.y - GroundedOffset,
-                transform.position.z);
+            Vector3 spherePosition = transform.position - GroundedOffset * transform.up;
             Grounded = Physics.CheckSphere(spherePosition, GroundedRadius, GroundLayers,
                 QueryTriggerInteraction.Ignore);
 
@@ -261,7 +258,6 @@ namespace StarterAssets
             if (_input.move == Vector2.zero) targetSpeed = 0.0f;
 
             // a reference to the players current horizontal velocity
-            //float currentHorizontalSpeed = new Vector3(_controller.velocity.x, 0.0f, _controller.velocity.z).magnitude;
             float currentHorizontalSpeed = new Vector3(_velocity.x, 0.0f, _velocity.z).magnitude;
 
             float speedOffset = 0.1f;
@@ -289,6 +285,7 @@ namespace StarterAssets
 
             // normalise input direction
             Vector3 inputDirection = new Vector3(_input.move.x, 0.0f, _input.move.y).normalized;
+            _targetRotationDebug = inputDirection;
 
             // note: Vector2's != operator uses approximation so is not floating point error prone, and is cheaper than magnitude
             // if there is a move input rotate player when the player is moving
@@ -299,19 +296,19 @@ namespace StarterAssets
                 float rotation = Mathf.SmoothDampAngle(transform.localEulerAngles.y, _targetRotation, ref _rotationVelocity,
                     RotationSmoothTime);
 
+                //float rotation = Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg + _mainCamera.transform.localEulerAngles.y;
+
                 // rotate to face input direction relative to camera position
                 //transform.localRotation = Quaternion.Euler(0.0f, rotation, 0.0f); //TODO: Fix rotation
             }
 
 
             Vector3 targetForwardDirection = Quaternion.Euler(0.0f, _targetRotation, 0.0f) * transform.forward; /*new Vector3(LocalDown.x, LocalDown.z, -LocalDown.y)*/;
-            _targetForward = targetForwardDirection;
+            _targetForwardDebug = targetForwardDirection;
             Vector3 targetUpDirection = - LocalDown;
 
 
             // move the player
-            //_controller.Move(targetForwardDirection.normalized * (_speed * Time.deltaTime) +
-            //                  targetUpDirection * _verticalVelocity * Time.deltaTime);
             transform.Translate(targetForwardDirection.normalized * (_speed * Time.deltaTime) + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
 
             // update animator if using character
@@ -385,7 +382,7 @@ namespace StarterAssets
             }
 
             // apply gravity over time if under terminal (multiply by delta time twice to linearly speed up over time)
-            if (_verticalVelocity < _terminalVelocity)
+            if (_verticalVelocity < _terminalVelocity && !Grounded)
             {
                 _verticalVelocity += Gravity * Time.deltaTime;
             }
@@ -408,19 +405,14 @@ namespace StarterAssets
 
             // when selected, draw a gizmo in the position of, and matching radius of, the grounded collider
             Gizmos.DrawSphere(
-                new Vector3(transform.position.x, transform.position.y - GroundedOffset, transform.position.z),
+                transform.position - GroundedOffset * transform.up,
                 GroundedRadius);
 
             Gizmos.color = Color.red;
-            Gizmos.DrawLine(transform.position, transform.position + _targetForward * 3.0f);
-            //Gizmos.DrawSphere(x, 3.0f);
+            Gizmos.DrawLine(transform.position, transform.position + _targetForwardDebug * 3.0f);
+            Gizmos.color = Color.green;
+            Gizmos.DrawLine(transform.position, transform.position + _targetRotationDebug * 3.0f);
         }
-
-        //private void OnDrawGizmos()
-        //{
-        //    Gizmos.color = Color.red;
-        //    Gizmos.DrawLine(transform.position, transform.position + _targetForward * 10.0f);
-        //}
 
         private void OnFootstep(AnimationEvent animationEvent)
         {
@@ -429,7 +421,6 @@ namespace StarterAssets
                 if (FootstepAudioClips.Length > 0)
                 {
                     var index = Random.Range(0, FootstepAudioClips.Length);
-                    //AudioSource.PlayClipAtPoint(FootstepAudioClips[index], transform.TransformPoint(_controller.center), FootstepAudioVolume);
                     AudioSource.PlayClipAtPoint(FootstepAudioClips[index], transform.position, FootstepAudioVolume);
                 }
             }
@@ -439,7 +430,6 @@ namespace StarterAssets
         {
             if (animationEvent.animatorClipInfo.weight > 0.5f)
             {
-                //AudioSource.PlayClipAtPoint(LandingAudioClip, transform.TransformPoint(_controller.center), FootstepAudioVolume);
                 AudioSource.PlayClipAtPoint(LandingAudioClip, transform.position, FootstepAudioVolume);
             }
         }
