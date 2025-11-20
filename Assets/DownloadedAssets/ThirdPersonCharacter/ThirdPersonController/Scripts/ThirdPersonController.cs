@@ -1,6 +1,7 @@
 ﻿ using UnityEngine;
 #if ENABLE_INPUT_SYSTEM 
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.XR;
 #endif
 
 /* Note: animations are called via the controller for both the character and capsule using animator null checks
@@ -8,7 +9,8 @@ using UnityEngine.InputSystem;
 
 namespace StarterAssets
 {
-    [RequireComponent(typeof(CharacterController))]
+    //[RequireComponent(typeof(CharacterController))]
+    [RequireComponent(typeof(Rigidbody))]
 #if ENABLE_INPUT_SYSTEM 
     [RequireComponent(typeof(PlayerInput))]
 #endif
@@ -77,6 +79,14 @@ namespace StarterAssets
 
         //Custom members
         public Vector3 LocalDown = Vector3.down;
+        [SerializeField] private bool _overwriteLocalDown = false;
+        private Vector3 _previousLocation;
+        private Vector3 _velocity;
+        private Rigidbody _rigidbody;
+
+        //Debug
+        private Vector3 _targetForward;
+        private Vector3 _targetPosition;
 
         // cinemachine
         private float _cinemachineTargetYaw;
@@ -105,7 +115,7 @@ namespace StarterAssets
         private PlayerInput _playerInput;
 #endif
         private Animator _animator;
-        private CharacterController _controller;
+        //private CharacterController _controller;
         private StarterAssetsInputs _input;
         private GameObject _mainCamera;
 
@@ -140,7 +150,8 @@ namespace StarterAssets
             _cinemachineTargetYaw = CinemachineCameraTarget.transform.rotation.eulerAngles.y;
             
             _hasAnimator = TryGetComponent(out _animator);
-            _controller = GetComponent<CharacterController>();
+            //_controller = GetComponent<CharacterController>();
+            _rigidbody = GetComponent<Rigidbody>();
             _input = GetComponent<StarterAssetsInputs>();
 #if ENABLE_INPUT_SYSTEM 
             _playerInput = GetComponent<PlayerInput>();
@@ -150,11 +161,16 @@ namespace StarterAssets
 
             AssignAnimationIDs();
 
-            LocalDown = transform.up * -1.0f;
+            if(!_overwriteLocalDown)
+            {
+                LocalDown = transform.up * -1.0f;
+            }
 
             // reset our timeouts on start
             _jumpTimeoutDelta = JumpTimeout;
             _fallTimeoutDelta = FallTimeout;
+
+            _previousLocation = transform.localPosition;
         }
 
         private void Update()
@@ -168,6 +184,7 @@ namespace StarterAssets
 
         private void LateUpdate()
         {
+            CalculateVelocity();
             CameraRotation();
         }
 
@@ -218,6 +235,20 @@ namespace StarterAssets
             CinemachineCameraTarget.transform.localRotation = newCameraTargetRotation;
         }
 
+        private void CalculateVelocity()
+        {
+            if(_previousLocation == transform.position)
+            {
+                _velocity = Vector3.zero;
+            }
+            else
+            {
+                _velocity = (transform.localPosition - _previousLocation) / Time.deltaTime;
+            }
+
+            _previousLocation = transform.localPosition;
+        }
+
         private void Move()
         {
             // set target speed based on move speed, sprint speed and if sprint is pressed
@@ -230,7 +261,8 @@ namespace StarterAssets
             if (_input.move == Vector2.zero) targetSpeed = 0.0f;
 
             // a reference to the players current horizontal velocity
-            float currentHorizontalSpeed = new Vector3(_controller.velocity.x, 0.0f, _controller.velocity.z).magnitude;
+            //float currentHorizontalSpeed = new Vector3(_controller.velocity.x, 0.0f, _controller.velocity.z).magnitude;
+            float currentHorizontalSpeed = new Vector3(_velocity.x, 0.0f, _velocity.z).magnitude;
 
             float speedOffset = 0.1f;
             float inputMagnitude = _input.analogMovement ? _input.move.magnitude : 1f;
@@ -272,13 +304,15 @@ namespace StarterAssets
             }
 
 
-            Vector3 targetForwardDirection = Quaternion.Euler(0.0f, _targetRotation, 0.0f) * new Vector3(LocalDown.x, LocalDown.z, -LocalDown.y);
+            Vector3 targetForwardDirection = Quaternion.Euler(0.0f, _targetRotation, 0.0f) * transform.forward; /*new Vector3(LocalDown.x, LocalDown.z, -LocalDown.y)*/;
+            _targetForward = targetForwardDirection;
             Vector3 targetUpDirection = - LocalDown;
 
 
             // move the player
-            _controller.Move(targetForwardDirection.normalized * (_speed * Time.deltaTime) +
-                              targetUpDirection * _verticalVelocity * Time.deltaTime);
+            //_controller.Move(targetForwardDirection.normalized * (_speed * Time.deltaTime) +
+            //                  targetUpDirection * _verticalVelocity * Time.deltaTime);
+            transform.Translate(targetForwardDirection.normalized * (_speed * Time.deltaTime) + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
 
             // update animator if using character
             if (_hasAnimator)
@@ -305,7 +339,7 @@ namespace StarterAssets
                 // stop our velocity dropping infinitely when grounded
                 if (_verticalVelocity < 0.0f)
                 {
-                    _verticalVelocity = -2f;
+                    _verticalVelocity = -0.0f;
                 }
 
                 // Jump
@@ -376,7 +410,17 @@ namespace StarterAssets
             Gizmos.DrawSphere(
                 new Vector3(transform.position.x, transform.position.y - GroundedOffset, transform.position.z),
                 GroundedRadius);
+
+            Gizmos.color = Color.red;
+            Gizmos.DrawLine(transform.position, transform.position + _targetForward * 3.0f);
+            //Gizmos.DrawSphere(x, 3.0f);
         }
+
+        //private void OnDrawGizmos()
+        //{
+        //    Gizmos.color = Color.red;
+        //    Gizmos.DrawLine(transform.position, transform.position + _targetForward * 10.0f);
+        //}
 
         private void OnFootstep(AnimationEvent animationEvent)
         {
@@ -385,7 +429,8 @@ namespace StarterAssets
                 if (FootstepAudioClips.Length > 0)
                 {
                     var index = Random.Range(0, FootstepAudioClips.Length);
-                    AudioSource.PlayClipAtPoint(FootstepAudioClips[index], transform.TransformPoint(_controller.center), FootstepAudioVolume);
+                    //AudioSource.PlayClipAtPoint(FootstepAudioClips[index], transform.TransformPoint(_controller.center), FootstepAudioVolume);
+                    AudioSource.PlayClipAtPoint(FootstepAudioClips[index], transform.position, FootstepAudioVolume);
                 }
             }
         }
@@ -394,7 +439,8 @@ namespace StarterAssets
         {
             if (animationEvent.animatorClipInfo.weight > 0.5f)
             {
-                AudioSource.PlayClipAtPoint(LandingAudioClip, transform.TransformPoint(_controller.center), FootstepAudioVolume);
+                //AudioSource.PlayClipAtPoint(LandingAudioClip, transform.TransformPoint(_controller.center), FootstepAudioVolume);
+                AudioSource.PlayClipAtPoint(LandingAudioClip, transform.position, FootstepAudioVolume);
             }
         }
     }
