@@ -92,6 +92,7 @@ namespace StarterAssets
         private Vector3 _inputCorrectedDebug;
         private Vector3 _inputLocalDebug;
         private Vector3 _cameraForwardDebug;
+        private Vector3 _startForward;
 
         // cinemachine
         private float _cinemachineTargetYaw;
@@ -174,6 +175,8 @@ namespace StarterAssets
             _fallTimeoutDelta = FallTimeout;
 
             _previousLocation = transform.localPosition;
+
+            _startForward = transform.forward;
         }
 
         private void Update()
@@ -228,6 +231,7 @@ namespace StarterAssets
 
             //Rotate the camera to conterbalance the object transform rotation
             _cinemachineTargetYaw += _cameraAdjustment;
+            _cameraAdjustment = 0.0f;
 
             // clamp our rotations so our values are limited 360 degrees
             _cinemachineTargetYaw = ClampAngle(_cinemachineTargetYaw, float.MinValue, float.MaxValue);
@@ -309,7 +313,7 @@ namespace StarterAssets
             _cameraForwardDebug = cameraForward;
 
             Vector3 correctedForwardDirection = UpVectorOffset * Vector3.forward;
-            float ForwardVectorOffsetAngle = Vector3.SignedAngle(correctedForwardDirection, cameraForward, transform.up); //cameraForward
+            float ForwardVectorOffsetAngle = Vector3.SignedAngle(correctedForwardDirection, _startForward, transform.up); //cameraForward
 
             Vector3 localInputDirection = (Quaternion.AngleAxis(ForwardVectorOffsetAngle, transform.up) * correctedInputDirection).normalized;
             if (inputDirection != Vector3.zero) _inputLocalDebug = localInputDirection;
@@ -330,11 +334,12 @@ namespace StarterAssets
 
                 // rotate to face input direction relative to camera position
                 Vector3 characterRotation = transform.localRotation.eulerAngles;
-                float cameraRotation = transform.localRotation.eulerAngles.y - _targetRotation;
+                float cameraRotation = transform.localRotation.eulerAngles.y - rotation;
                 float cameraRotationUnit = cameraRotation / 360.0f;
-                float restrictedCameraRotation = (cameraRotationUnit - Mathf.Floor(cameraRotationUnit)) * 360.0f;
-                if(restrictedCameraRotation > 0) Debug.LogWarning("Camera : " + restrictedCameraRotation);
-                transform.localRotation = Quaternion.Euler(characterRotation.x, _targetRotation, characterRotation.z); //TODO: Fix rotation
+                float restrictedCameraRotation = Mathf.Round(((cameraRotationUnit - Mathf.Floor(cameraRotationUnit - 0.5f) - 1.0f) * 360.0f) * 100.0f) / 100.0f;
+                if(restrictedCameraRotation > 0 || restrictedCameraRotation < 0) Debug.LogWarning("Camera : " + restrictedCameraRotation);
+                transform.localRotation = Quaternion.Euler(characterRotation.x, rotation, characterRotation.z); //TODO: Fix rotation
+
                 _cameraAdjustment = restrictedCameraRotation;
             }
 
