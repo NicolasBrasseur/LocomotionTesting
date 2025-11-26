@@ -83,6 +83,7 @@ namespace StarterAssets
         private Vector3 _previousLocation;
         private Vector3 _velocity;
         private Rigidbody _rigidbody;
+        private float _cameraAdjustment;
 
         //Debug
         private Vector3 _targetForwardDebug;
@@ -225,6 +226,9 @@ namespace StarterAssets
                 _cinemachineTargetPitch += _input.look.y * deltaTimeMultiplier;
             }
 
+            //Rotate the camera to conterbalance the object transform rotation
+            _cinemachineTargetYaw += _cameraAdjustment;
+
             // clamp our rotations so our values are limited 360 degrees
             _cinemachineTargetYaw = ClampAngle(_cinemachineTargetYaw, float.MinValue, float.MaxValue);
             _cinemachineTargetPitch = ClampAngle(_cinemachineTargetPitch, BottomClamp, TopClamp);
@@ -305,7 +309,7 @@ namespace StarterAssets
             _cameraForwardDebug = cameraForward;
 
             Vector3 correctedForwardDirection = UpVectorOffset * Vector3.forward;
-            float ForwardVectorOffsetAngle = Vector3.SignedAngle(correctedForwardDirection, cameraForward, transform.up);
+            float ForwardVectorOffsetAngle = Vector3.SignedAngle(correctedForwardDirection, cameraForward, transform.up); //cameraForward
 
             Vector3 localInputDirection = (Quaternion.AngleAxis(ForwardVectorOffsetAngle, transform.up) * correctedInputDirection).normalized;
             if (inputDirection != Vector3.zero) _inputLocalDebug = localInputDirection;
@@ -317,15 +321,21 @@ namespace StarterAssets
             if (_input.move != Vector2.zero)
             {
                 //_targetRotation = Mathf.Atan2(localInputDirection.x, localInputDirection.z) * Mathf.Rad2Deg + _mainCamera.transform.localEulerAngles.y;
-                _targetRotation = Quaternion.FromToRotation(localInputDirection, cameraForward).normalized.eulerAngles.y;
-                Debug.Log(Quaternion.FromToRotation(localInputDirection, transform.forward).normalized.eulerAngles);
-                float rotation = Mathf.SmoothDampAngle(transform.localEulerAngles.y, _targetRotation, ref _rotationVelocity,
-                    RotationSmoothTime);
+                _targetRotation = Mathf.Atan2(localInputDirection.x, localInputDirection.z) * Mathf.Rad2Deg;
+                _targetRotation = Mathf.Round(_targetRotation * 100.0f) / 100.0f;
+                Debug.Log("Rotation : " + _targetRotation);
+                float rotation = Mathf.SmoothDampAngle(transform.localEulerAngles.y, _targetRotation, ref _rotationVelocity, RotationSmoothTime);
 
                 //float rotation = Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg + _mainCamera.transform.localEulerAngles.y;
 
                 // rotate to face input direction relative to camera position
-                //transform.localRotation = Quaternion.Euler(0.0f, rotation, 0.0f); //TODO: Fix rotation
+                Vector3 characterRotation = transform.localRotation.eulerAngles;
+                float cameraRotation = transform.localRotation.eulerAngles.y - _targetRotation;
+                float cameraRotationUnit = cameraRotation / 360.0f;
+                float restrictedCameraRotation = (cameraRotationUnit - Mathf.Floor(cameraRotationUnit)) * 360.0f;
+                if(restrictedCameraRotation > 0) Debug.LogWarning("Camera : " + restrictedCameraRotation);
+                transform.localRotation = Quaternion.Euler(characterRotation.x, _targetRotation, characterRotation.z); //TODO: Fix rotation
+                _cameraAdjustment = restrictedCameraRotation;
             }
 
 
