@@ -87,6 +87,10 @@ namespace StarterAssets
         //Debug
         private Vector3 _targetForwardDebug;
         private Vector3 _targetRotationDebug;
+        private Vector3 _inputDirectionDebug;
+        private Vector3 _inputCorrectedDebug;
+        private Vector3 _inputLocalDebug;
+        private Vector3 _cameraForwardDebug;
 
         // cinemachine
         private float _cinemachineTargetYaw;
@@ -285,14 +289,36 @@ namespace StarterAssets
 
             // normalise input direction
             Vector3 inputDirection = new Vector3(_input.move.x, 0.0f, _input.move.y).normalized;
-            _targetRotationDebug = inputDirection;
+            if(inputDirection != Vector3.zero) _inputDirectionDebug = inputDirection;
+
+            Quaternion UpVectorOffset = Quaternion.FromToRotation(Vector3.up, transform.up).normalized;
+            Vector3 correctedInputDirection = UpVectorOffset * inputDirection;
+            if (inputDirection != Vector3.zero) _inputCorrectedDebug = correctedInputDirection;
+
+            /*Vector3 correctedForwardDirection = UpVectorOffset * Vector3.forward;
+            Quaternion ForwardVectorOffset = Quaternion.FromToRotation(correctedForwardDirection, transform.forward).normalized;
+            float ForwardVectorOffsetAngle = ForwardVectorOffset.eulerAngles.y;
+            Vector3 localInputDirection = (Quaternion.AngleAxis(ForwardVectorOffsetAngle, transform.up) * correctedInputDirection).normalized;
+            if (inputDirection != Vector3.zero) _inputLocalDebug = localInputDirection;*/
+
+            Vector3 cameraForward = Vector3.ProjectOnPlane(_mainCamera.transform.forward, transform.up);
+            _cameraForwardDebug = cameraForward;
+
+            Vector3 correctedForwardDirection = UpVectorOffset * Vector3.forward;
+            float ForwardVectorOffsetAngle = Vector3.SignedAngle(correctedForwardDirection, cameraForward, transform.up);
+
+            Vector3 localInputDirection = (Quaternion.AngleAxis(ForwardVectorOffsetAngle, transform.up) * correctedInputDirection).normalized;
+            if (inputDirection != Vector3.zero) _inputLocalDebug = localInputDirection;
+
+            _targetRotationDebug = localInputDirection;
 
             // note: Vector2's != operator uses approximation so is not floating point error prone, and is cheaper than magnitude
             // if there is a move input rotate player when the player is moving
             if (_input.move != Vector2.zero)
             {
-                _targetRotation = Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg +
-                                  _mainCamera.transform.localEulerAngles.y;
+                //_targetRotation = Mathf.Atan2(localInputDirection.x, localInputDirection.z) * Mathf.Rad2Deg + _mainCamera.transform.localEulerAngles.y;
+                _targetRotation = Quaternion.FromToRotation(localInputDirection, cameraForward).normalized.eulerAngles.y;
+                Debug.Log(Quaternion.FromToRotation(localInputDirection, transform.forward).normalized.eulerAngles);
                 float rotation = Mathf.SmoothDampAngle(transform.localEulerAngles.y, _targetRotation, ref _rotationVelocity,
                     RotationSmoothTime);
 
@@ -303,7 +329,8 @@ namespace StarterAssets
             }
 
 
-            Vector3 targetForwardDirection = Quaternion.Euler(0.0f, _targetRotation, 0.0f) * transform.forward; /*new Vector3(LocalDown.x, LocalDown.z, -LocalDown.y)*/;
+            //Vector3 targetForwardDirection = Quaternion.Euler(0.0f, _targetRotation, 0.0f) * transform.forward; /*new Vector3(LocalDown.x, LocalDown.z, -LocalDown.y)*/
+            Vector3 targetForwardDirection = localInputDirection;
             _targetForwardDebug = targetForwardDirection;
             Vector3 targetUpDirection = - LocalDown;
 
@@ -408,10 +435,16 @@ namespace StarterAssets
                 transform.position - GroundedOffset * transform.up,
                 GroundedRadius);
 
-            Gizmos.color = Color.red;
-            Gizmos.DrawLine(transform.position, transform.position + _targetForwardDebug * 3.0f);
+            Gizmos.color = Color.white;
+            Gizmos.DrawLine(transform.position, transform.position + _inputDirectionDebug * 5.0f);
             Gizmos.color = Color.green;
-            Gizmos.DrawLine(transform.position, transform.position + _targetRotationDebug * 3.0f);
+            Gizmos.DrawLine(transform.position, transform.position + _inputCorrectedDebug * 5.0f);
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawLine(transform.position, transform.position + _inputLocalDebug * 5.0f);
+            Gizmos.color = Color.red;
+            Gizmos.DrawLine(transform.position, transform.position + transform.forward * 3.0f);
+            Gizmos.color = Color.blue;
+            Gizmos.DrawLine(transform.position, transform.position + _cameraForwardDebug * 3.0f);
         }
 
         private void OnFootstep(AnimationEvent animationEvent)
