@@ -1,4 +1,5 @@
-﻿ using UnityEngine;
+﻿using System.Runtime.CompilerServices;
+using UnityEngine;
 #if ENABLE_INPUT_SYSTEM 
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.XR;
@@ -86,13 +87,10 @@ namespace StarterAssets
         private float _cameraAdjustment;
 
         //Debug
-        private Vector3 _targetForwardDebug;
-        private Vector3 _targetRotationDebug;
         private Vector3 _inputDirectionDebug;
-        private Vector3 _inputCorrectedDebug;
-        private Vector3 _inputLocalDebug;
+        private Vector3 _inputProjectedDebug;
+        private Vector3 _inputCameraBasedDebug;
         private Vector3 _cameraForwardDebug;
-        private Vector3 _startForward;
 
         // cinemachine
         private float _cinemachineTargetYaw;
@@ -175,15 +173,11 @@ namespace StarterAssets
             _fallTimeoutDelta = FallTimeout;
 
             _previousLocation = transform.localPosition;
-
-            _startForward = transform.forward;
         }
 
         private void Update()
         {
             _hasAnimator = TryGetComponent(out _animator);
-
-            //transform.Rotate(0.0f, -5.0f * Time.deltaTime, 0.0f, Space.Self);
 
             JumpAndGravity();
             GroundedCheck();
@@ -192,7 +186,6 @@ namespace StarterAssets
 
         private void LateUpdate()
         {
-            CalculateVelocity();
             CameraRotation();
         }
 
@@ -231,7 +224,7 @@ namespace StarterAssets
                 _cinemachineTargetPitch += _input.look.y * deltaTimeMultiplier;
             }
 
-            //Rotate the camera to conterbalance the object transform rotation
+            //Rotate the camera to conterbalance the player rotation
             _cinemachineTargetYaw += _cameraAdjustment;
             _cameraAdjustment = 0.0f;
 
@@ -246,109 +239,105 @@ namespace StarterAssets
             CinemachineCameraTarget.transform.localRotation = newCameraTargetRotation;
         }
 
-        private void CalculateVelocity()
-        {
-            if(_previousLocation == transform.position)
-            {
-                _velocity = Vector3.zero;
-            }
-            else
-            {
-                _velocity = (transform.localPosition - _previousLocation) / Time.deltaTime;
-            }
-
-            _previousLocation = transform.localPosition;
-        }
-
         private void Move()
         {
-            // set target speed based on move speed, sprint speed and if sprint is pressed
-            float targetSpeed = _input.sprint ? SprintSpeed : MoveSpeed;
+            SetPlayerSpeed();
 
-            // a simplistic acceleration and deceleration designed to be easy to remove, replace, or iterate upon
+            Vector3 cameraBasedInputDirection = Vector3.zero;
+            RotatePlayer();
+            MovePlayer();
 
-            // note: Vector2's == operator uses approximation so is not floating point error prone, and is cheaper than magnitude
-            // if there is no input, set the target speed to 0
-            if (_input.move == Vector2.zero) targetSpeed = 0.0f;
-
-            // a reference to the players current horizontal velocity
-            float currentHorizontalSpeed = new Vector3(_velocity.x, 0.0f, _velocity.z).magnitude;
-
-            float speedOffset = 0.1f;
-            float inputMagnitude = _input.analogMovement ? _input.move.magnitude : 1f;
-
-            // accelerate or decelerate to target speed
-            if (_speed < targetSpeed - speedOffset ||
-                _speed > targetSpeed + speedOffset)
+            void SetPlayerSpeed()
             {
-                // creates curved result rather than a linear one giving a more organic speed change
-                // note T in Lerp is clamped, so we don't need to clamp our speed
-                _speed = Mathf.Lerp(_speed, targetSpeed * inputMagnitude,
-                    Time.deltaTime * SpeedChangeRate);
+                // set target speed based on move speed, sprint speed and if sprint is pressed
+                float targetSpeed = _input.sprint ? SprintSpeed : MoveSpeed;
 
-                // round speed to 3 decimal places
-                _speed = Mathf.Round(_speed * 1000f) / 1000f;
-            }
-            else
-            {
-                _speed = targetSpeed;
-            }
+                // a simplistic acceleration and deceleration designed to be easy to remove, replace, or iterate upon
 
-            _animationBlend = Mathf.Lerp(_animationBlend, targetSpeed, Time.deltaTime * SpeedChangeRate);
-            if (_animationBlend < 0.01f) _animationBlend = 0f;
+                // note: Vector2's == operator uses approximation so is not floating point error prone, and is cheaper than magnitude
+                // if there is no input, set the target speed to 0
+                if (_input.move == Vector2.zero) targetSpeed = 0.0f;
 
-            // normalise input direction
-            Vector3 inputDirection = new Vector3(_input.move.x, 0.0f, _input.move.y).normalized;
-            if(inputDirection != Vector3.zero) _inputDirectionDebug = inputDirection;
+                float speedOffset = 0.1f;
+                float inputMagnitude = _input.analogMovement ? _input.move.magnitude : 1f;
 
-            Quaternion UpVectorOffset = Quaternion.FromToRotation(Vector3.up, transform.up).normalized;
-            Vector3 correctedInputDirection = UpVectorOffset * inputDirection;
-            if (inputDirection != Vector3.zero) _inputCorrectedDebug = correctedInputDirection;
+                // accelerate or decelerate to target speed
+                if (_speed < targetSpeed - speedOffset ||
+                    _speed > targetSpeed + speedOffset)
+                {
+                    // creates curved result rather than a linear one giving a more organic speed change
+                    // note T in Lerp is clamped, so we don't need to clamp our speed
+                    _speed = Mathf.Lerp(_speed, targetSpeed * inputMagnitude,
+                        Time.deltaTime * SpeedChangeRate);
 
-            Vector3 cameraForward = Vector3.ProjectOnPlane(_mainCamera.transform.forward, transform.up);
-            Vector3 cameraRight = Vector3.ProjectOnPlane(_mainCamera.transform.right, transform.up);
-            _cameraForwardDebug = cameraForward;
+                    // round speed to 3 decimal places
+                    _speed = Mathf.Round(_speed * 1000f) / 1000f;
+                }
+                else
+                {
+                    _speed = targetSpeed;
+                }
 
-            Vector3 correctedForwardDirection = UpVectorOffset * Vector3.forward;
-            float ForwardVectorOffsetAngle = Vector3.SignedAngle(correctedForwardDirection, cameraForward, transform.up); //cameraForward
+                //Set animation blend parameter based on speed
+                _animationBlend = Mathf.Lerp(_animationBlend, targetSpeed, Time.deltaTime * SpeedChangeRate);
+                if (_animationBlend < 0.01f) _animationBlend = 0f;
 
-            Vector3 localInputDirection = (Quaternion.AngleAxis(ForwardVectorOffsetAngle, transform.up) * correctedInputDirection).normalized;
-            if (inputDirection != Vector3.zero) _inputLocalDebug = localInputDirection;
-
-            _targetRotationDebug = localInputDirection;
-
-            // note: Vector2's != operator uses approximation so is not floating point error prone, and is cheaper than magnitude
-            // if there is a move input rotate player when the player is moving
-            if (_input.move != Vector2.zero)
-            {
-                _targetRotation = Mathf.Atan2(localInputDirection.x, localInputDirection.z) * Mathf.Rad2Deg;
-                _targetRotation = Mathf.Round(_targetRotation * 100.0f) / 100.0f;
-                Vector3 characterRotation = transform.localRotation.eulerAngles;
-
-                float currentAngle = Vector3.SignedAngle(cameraForward, transform.forward, transform.up);
-                float desiredAngle = Vector3.SignedAngle(cameraForward, localInputDirection, transform.up);
-                float smoothAngle = Mathf.SmoothDampAngle(currentAngle, desiredAngle, ref _rotationVelocity, RotationSmoothTime);
-                float deltaRotation = smoothAngle - currentAngle;
-                transform.rotation = Quaternion.AngleAxis(deltaRotation, transform.up) * transform.rotation;
-
-                _cameraAdjustment = -deltaRotation;
+                // update animator if using character
+                if (_hasAnimator)
+                {
+                    _animator.SetFloat(_animIDSpeed, _animationBlend);
+                    _animator.SetFloat(_animIDMotionSpeed, inputMagnitude);
+                }
             }
 
-
-            //Vector3 targetForwardDirection = Quaternion.Euler(0.0f, _targetRotation, 0.0f) * transform.forward; /*new Vector3(LocalDown.x, LocalDown.z, -LocalDown.y)*/
-            Vector3 targetForwardDirection = localInputDirection;
-            _targetForwardDebug = targetForwardDirection;
-            Vector3 targetUpDirection = - LocalDown;
-
-
-            // move the player
-            transform.Translate(targetForwardDirection.normalized * (_speed * Time.deltaTime) + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
-
-            // update animator if using character
-            if (_hasAnimator)
+            void RotatePlayer()
             {
-                _animator.SetFloat(_animIDSpeed, _animationBlend);
-                _animator.SetFloat(_animIDMotionSpeed, inputMagnitude);
+                // Get normalised input direction
+                Vector3 absoluteInputDirection = new Vector3(_input.move.x, 0.0f, _input.move.y).normalized;
+                /* DEBUG */ if (absoluteInputDirection != Vector3.zero) _inputDirectionDebug = absoluteInputDirection;
+
+                Quaternion absoluteToLocalRotation = Quaternion.FromToRotation(Vector3.up, transform.up).normalized;
+                Vector3 projectedInputDirection = absoluteToLocalRotation * absoluteInputDirection;
+                /* DEBUG */ if (absoluteInputDirection != Vector3.zero) _inputProjectedDebug = projectedInputDirection;
+
+                Vector3 projectedCameraForward = Vector3.ProjectOnPlane(_mainCamera.transform.forward, transform.up);
+                Vector3 projectedCameraRight = Vector3.ProjectOnPlane(_mainCamera.transform.right, transform.up);
+                /* DEBUG */ _cameraForwardDebug = projectedCameraForward;
+
+                Vector3 projectedForwardDirection = absoluteToLocalRotation * Vector3.forward;
+                float projectedCameraAngle = Vector3.SignedAngle(projectedForwardDirection, projectedCameraForward, transform.up);
+
+                // Rotate the input direction based on the camera angle
+                cameraBasedInputDirection = (Quaternion.AngleAxis(projectedCameraAngle, transform.up) * projectedInputDirection).normalized;
+                /* DEBUG */ if (absoluteInputDirection != Vector3.zero) _inputCameraBasedDebug = cameraBasedInputDirection;
+
+                // note: Vector2's != operator uses approximation so is not floating point error prone, and is cheaper than magnitude
+                // if there is a move input rotate player when the player is moving
+                if (_input.move != Vector2.zero)
+                {
+                    // Get player target rotation and round it to 3 decimal places
+                    _targetRotation = Mathf.Atan2(cameraBasedInputDirection.x, cameraBasedInputDirection.z) * Mathf.Rad2Deg;
+                    _targetRotation = Mathf.Round(_targetRotation * 1000.0f) / 1000.0f;
+
+                    float currentAngle = Vector3.SignedAngle(projectedCameraForward, transform.forward, transform.up);
+                    float desiredAngle = Vector3.SignedAngle(projectedCameraForward, cameraBasedInputDirection, transform.up);
+                    float smoothAngle = Mathf.SmoothDampAngle(currentAngle, desiredAngle, ref _rotationVelocity, RotationSmoothTime);
+                    float deltaRotation = smoothAngle - currentAngle;
+
+                    transform.rotation = Quaternion.AngleAxis(deltaRotation, transform.up) * transform.rotation;
+
+                    // Rotate camera in the opposite direction to counter-balance player rotation
+                    _cameraAdjustment = -deltaRotation;
+                }
+            }
+
+            void MovePlayer()
+            {
+                Vector3 targetForwardDirection = cameraBasedInputDirection;
+                Vector3 targetUpDirection = -LocalDown;
+
+                // move the player
+                transform.Translate(targetForwardDirection.normalized * (_speed * Time.deltaTime) + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
             }
         }
 
@@ -444,11 +433,9 @@ namespace StarterAssets
             Gizmos.color = Color.white;
             Gizmos.DrawLine(transform.position, transform.position + _inputDirectionDebug * 5.0f);
             Gizmos.color = Color.green;
-            Gizmos.DrawLine(transform.position, transform.position + _inputCorrectedDebug * 5.0f);
+            Gizmos.DrawLine(transform.position, transform.position + _inputProjectedDebug * 5.0f);
             Gizmos.color = Color.yellow;
-            Gizmos.DrawLine(transform.position, transform.position + _inputLocalDebug * 5.0f);
-            Gizmos.color = Color.red;
-            Gizmos.DrawLine(transform.position, transform.position + transform.up * 10.0f);
+            Gizmos.DrawLine(transform.position, transform.position + _inputCameraBasedDebug * 5.0f);
             Gizmos.color = Color.blue;
             Gizmos.DrawLine(transform.position, transform.position + _cameraForwardDebug * 3.0f);
         }
