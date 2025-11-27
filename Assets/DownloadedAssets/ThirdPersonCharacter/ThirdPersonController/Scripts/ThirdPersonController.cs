@@ -1,4 +1,4 @@
-﻿ using UnityEngine;
+﻿using UnityEngine;
 #if ENABLE_INPUT_SYSTEM 
 using UnityEngine.InputSystem;
 #endif
@@ -8,7 +8,8 @@ using UnityEngine.InputSystem;
 
 namespace StarterAssets
 {
-    [RequireComponent(typeof(CharacterController))]
+    [RequireComponent(typeof(Rigidbody))]
+    [RequireComponent(typeof(Collider))]
 #if ENABLE_INPUT_SYSTEM 
     [RequireComponent(typeof(PlayerInput))]
 #endif
@@ -75,6 +76,20 @@ namespace StarterAssets
         [Tooltip("For locking the camera position on all axis")]
         public bool LockCameraPosition = false;
 
+        //Custom members
+        public Vector3 LocalDown = Vector3.down;
+        [SerializeField] private bool _overwriteLocalDown = false;
+        private Vector3 _previousLocation;
+        private Vector3 _velocity;
+        private Rigidbody _rigidbody;
+        private float _cameraAdjustment;
+
+        //Debug
+        private Vector3 _inputDirectionDebug;
+        private Vector3 _inputProjectedDebug;
+        private Vector3 _inputCameraBasedDebug;
+        private Vector3 _cameraForwardDebug;
+
         // cinemachine
         private float _cinemachineTargetYaw;
         private float _cinemachineTargetPitch;
@@ -102,7 +117,6 @@ namespace StarterAssets
         private PlayerInput _playerInput;
 #endif
         private Animator _animator;
-        private CharacterController _controller;
         private StarterAssetsInputs _input;
         private GameObject _mainCamera;
 
@@ -137,7 +151,7 @@ namespace StarterAssets
             _cinemachineTargetYaw = CinemachineCameraTarget.transform.rotation.eulerAngles.y;
             
             _hasAnimator = TryGetComponent(out _animator);
-            _controller = GetComponent<CharacterController>();
+            _rigidbody = GetComponent<Rigidbody>();
             _input = GetComponent<StarterAssetsInputs>();
 #if ENABLE_INPUT_SYSTEM 
             _playerInput = GetComponent<PlayerInput>();
@@ -147,9 +161,16 @@ namespace StarterAssets
 
             AssignAnimationIDs();
 
+            if(!_overwriteLocalDown)
+            {
+                LocalDown = transform.up * -1.0f;
+            }
+
             // reset our timeouts on start
             _jumpTimeoutDelta = JumpTimeout;
             _fallTimeoutDelta = FallTimeout;
+
+            _previousLocation = transform.localPosition;
         }
 
         private void Update()
@@ -178,8 +199,7 @@ namespace StarterAssets
         private void GroundedCheck()
         {
             // set sphere position, with offset
-            Vector3 spherePosition = new Vector3(transform.position.x, transform.position.y - GroundedOffset,
-                transform.position.z);
+            Vector3 spherePosition = transform.position - GroundedOffset * transform.up;
             Grounded = Physics.CheckSphere(spherePosition, GroundedRadius, GroundLayers,
                 QueryTriggerInteraction.Ignore);
 
@@ -202,80 +222,120 @@ namespace StarterAssets
                 _cinemachineTargetPitch += _input.look.y * deltaTimeMultiplier;
             }
 
+            //Rotate the camera to conterbalance the player rotation
+            _cinemachineTargetYaw += _cameraAdjustment;
+            _cameraAdjustment = 0.0f;
+
             // clamp our rotations so our values are limited 360 degrees
             _cinemachineTargetYaw = ClampAngle(_cinemachineTargetYaw, float.MinValue, float.MaxValue);
             _cinemachineTargetPitch = ClampAngle(_cinemachineTargetPitch, BottomClamp, TopClamp);
 
             // Cinemachine will follow this target
-            CinemachineCameraTarget.transform.rotation = Quaternion.Euler(_cinemachineTargetPitch + CameraAngleOverride,
+            Quaternion newCameraTargetRotation = Quaternion.Euler(_cinemachineTargetPitch + CameraAngleOverride,
                 _cinemachineTargetYaw, 0.0f);
+
+            CinemachineCameraTarget.transform.localRotation = newCameraTargetRotation;
         }
 
         private void Move()
         {
-            // set target speed based on move speed, sprint speed and if sprint is pressed
-            float targetSpeed = _input.sprint ? SprintSpeed : MoveSpeed;
+            SetPlayerSpeed();
 
-            // a simplistic acceleration and deceleration designed to be easy to remove, replace, or iterate upon
+            Vector3 cameraBasedInputDirection = Vector3.zero;
+            RotatePlayer();
+            MovePlayer();
 
-            // note: Vector2's == operator uses approximation so is not floating point error prone, and is cheaper than magnitude
-            // if there is no input, set the target speed to 0
-            if (_input.move == Vector2.zero) targetSpeed = 0.0f;
-
-            // a reference to the players current horizontal velocity
-            float currentHorizontalSpeed = new Vector3(_controller.velocity.x, 0.0f, _controller.velocity.z).magnitude;
-
-            float speedOffset = 0.1f;
-            float inputMagnitude = _input.analogMovement ? _input.move.magnitude : 1f;
-
-            // accelerate or decelerate to target speed
-            if (currentHorizontalSpeed < targetSpeed - speedOffset ||
-                currentHorizontalSpeed > targetSpeed + speedOffset)
+            void SetPlayerSpeed()
             {
-                // creates curved result rather than a linear one giving a more organic speed change
-                // note T in Lerp is clamped, so we don't need to clamp our speed
-                _speed = Mathf.Lerp(currentHorizontalSpeed, targetSpeed * inputMagnitude,
-                    Time.deltaTime * SpeedChangeRate);
+                // set target speed based on move speed, sprint speed and if sprint is pressed
+                float targetSpeed = _input.sprint ? SprintSpeed : MoveSpeed;
 
-                // round speed to 3 decimal places
-                _speed = Mathf.Round(_speed * 1000f) / 1000f;
-            }
-            else
-            {
-                _speed = targetSpeed;
-            }
+                // a simplistic acceleration and deceleration designed to be easy to remove, replace, or iterate upon
 
-            _animationBlend = Mathf.Lerp(_animationBlend, targetSpeed, Time.deltaTime * SpeedChangeRate);
-            if (_animationBlend < 0.01f) _animationBlend = 0f;
+                // note: Vector2's == operator uses approximation so is not floating point error prone, and is cheaper than magnitude
+                // if there is no input, set the target speed to 0
+                if (_input.move == Vector2.zero) targetSpeed = 0.0f;
 
-            // normalise input direction
-            Vector3 inputDirection = new Vector3(_input.move.x, 0.0f, _input.move.y).normalized;
+                float speedOffset = 0.1f;
+                float inputMagnitude = _input.analogMovement ? _input.move.magnitude : 1f;
 
-            // note: Vector2's != operator uses approximation so is not floating point error prone, and is cheaper than magnitude
-            // if there is a move input rotate player when the player is moving
-            if (_input.move != Vector2.zero)
-            {
-                _targetRotation = Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg +
-                                  _mainCamera.transform.eulerAngles.y;
-                float rotation = Mathf.SmoothDampAngle(transform.eulerAngles.y, _targetRotation, ref _rotationVelocity,
-                    RotationSmoothTime);
+                // accelerate or decelerate to target speed
+                if (_speed < targetSpeed - speedOffset ||
+                    _speed > targetSpeed + speedOffset)
+                {
+                    // creates curved result rather than a linear one giving a more organic speed change
+                    // note T in Lerp is clamped, so we don't need to clamp our speed
+                    _speed = Mathf.Lerp(_speed, targetSpeed * inputMagnitude,
+                        Time.deltaTime * SpeedChangeRate);
 
-                // rotate to face input direction relative to camera position
-                transform.rotation = Quaternion.Euler(0.0f, rotation, 0.0f);
+                    // round speed to 3 decimal places
+                    _speed = Mathf.Round(_speed * 1000f) / 1000f;
+                }
+                else
+                {
+                    _speed = targetSpeed;
+                }
+
+                //Set animation blend parameter based on speed
+                _animationBlend = Mathf.Lerp(_animationBlend, targetSpeed, Time.deltaTime * SpeedChangeRate);
+                if (_animationBlend < 0.01f) _animationBlend = 0f;
+
+                // update animator if using character
+                if (_hasAnimator)
+                {
+                    _animator.SetFloat(_animIDSpeed, _animationBlend);
+                    _animator.SetFloat(_animIDMotionSpeed, inputMagnitude);
+                }
             }
 
-
-            Vector3 targetDirection = Quaternion.Euler(0.0f, _targetRotation, 0.0f) * Vector3.forward;
-
-            // move the player
-            _controller.Move(targetDirection.normalized * (_speed * Time.deltaTime) +
-                             new Vector3(0.0f, _verticalVelocity, 0.0f) * Time.deltaTime);
-
-            // update animator if using character
-            if (_hasAnimator)
+            void RotatePlayer()
             {
-                _animator.SetFloat(_animIDSpeed, _animationBlend);
-                _animator.SetFloat(_animIDMotionSpeed, inputMagnitude);
+                // Get normalised input direction
+                Vector3 absoluteInputDirection = new Vector3(_input.move.x, 0.0f, _input.move.y).normalized;
+                /* DEBUG */ if (absoluteInputDirection != Vector3.zero) _inputDirectionDebug = absoluteInputDirection;
+
+                Quaternion absoluteToLocalRotation = Quaternion.FromToRotation(Vector3.up, transform.up).normalized;
+                Vector3 projectedInputDirection = absoluteToLocalRotation * absoluteInputDirection;
+                /* DEBUG */ if (absoluteInputDirection != Vector3.zero) _inputProjectedDebug = projectedInputDirection;
+
+                Vector3 projectedCameraForward = Vector3.ProjectOnPlane(_mainCamera.transform.forward, transform.up);
+                Vector3 projectedCameraRight = Vector3.ProjectOnPlane(_mainCamera.transform.right, transform.up);
+                /* DEBUG */ _cameraForwardDebug = projectedCameraForward;
+
+                Vector3 projectedForwardDirection = absoluteToLocalRotation * Vector3.forward;
+                float projectedCameraAngle = Vector3.SignedAngle(projectedForwardDirection, projectedCameraForward, transform.up);
+
+                // Rotate the input direction based on the camera angle
+                cameraBasedInputDirection = (Quaternion.AngleAxis(projectedCameraAngle, transform.up) * projectedInputDirection).normalized;
+                /* DEBUG */ if (absoluteInputDirection != Vector3.zero) _inputCameraBasedDebug = cameraBasedInputDirection;
+
+                // note: Vector2's != operator uses approximation so is not floating point error prone, and is cheaper than magnitude
+                // if there is a move input rotate player when the player is moving
+                if (_input.move != Vector2.zero)
+                {
+                    // Get player target rotation and round it to 3 decimal places
+                    _targetRotation = Mathf.Atan2(cameraBasedInputDirection.x, cameraBasedInputDirection.z) * Mathf.Rad2Deg;
+                    _targetRotation = Mathf.Round(_targetRotation * 1000.0f) / 1000.0f;
+
+                    float currentAngle = Vector3.SignedAngle(projectedCameraForward, transform.forward, transform.up);
+                    float desiredAngle = Vector3.SignedAngle(projectedCameraForward, cameraBasedInputDirection, transform.up);
+                    float smoothAngle = Mathf.SmoothDampAngle(currentAngle, desiredAngle, ref _rotationVelocity, RotationSmoothTime);
+                    float deltaRotation = smoothAngle - currentAngle;
+
+                    transform.rotation = Quaternion.AngleAxis(deltaRotation, transform.up) * transform.rotation;
+
+                    // Rotate camera in the opposite direction to counter-balance player rotation
+                    _cameraAdjustment = -deltaRotation;
+                }
+            }
+
+            void MovePlayer()
+            {
+                Vector3 targetForwardDirection = cameraBasedInputDirection;
+                Vector3 targetUpDirection = -LocalDown;
+
+                // move the player
+                transform.Translate(targetForwardDirection.normalized * (_speed * Time.deltaTime) + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
             }
         }
 
@@ -296,7 +356,7 @@ namespace StarterAssets
                 // stop our velocity dropping infinitely when grounded
                 if (_verticalVelocity < 0.0f)
                 {
-                    _verticalVelocity = -2f;
+                    _verticalVelocity = -0.0f;
                 }
 
                 // Jump
@@ -342,7 +402,7 @@ namespace StarterAssets
             }
 
             // apply gravity over time if under terminal (multiply by delta time twice to linearly speed up over time)
-            if (_verticalVelocity < _terminalVelocity)
+            if (_verticalVelocity < _terminalVelocity && !Grounded)
             {
                 _verticalVelocity += Gravity * Time.deltaTime;
             }
@@ -365,8 +425,17 @@ namespace StarterAssets
 
             // when selected, draw a gizmo in the position of, and matching radius of, the grounded collider
             Gizmos.DrawSphere(
-                new Vector3(transform.position.x, transform.position.y - GroundedOffset, transform.position.z),
+                transform.position - GroundedOffset * transform.up,
                 GroundedRadius);
+
+            Gizmos.color = Color.white;
+            Gizmos.DrawLine(transform.position, transform.position + _inputDirectionDebug * 5.0f);
+            Gizmos.color = Color.green;
+            Gizmos.DrawLine(transform.position, transform.position + _inputProjectedDebug * 5.0f);
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawLine(transform.position, transform.position + _inputCameraBasedDebug * 5.0f);
+            Gizmos.color = Color.blue;
+            Gizmos.DrawLine(transform.position, transform.position + _cameraForwardDebug * 3.0f);
         }
 
         private void OnFootstep(AnimationEvent animationEvent)
@@ -376,7 +445,7 @@ namespace StarterAssets
                 if (FootstepAudioClips.Length > 0)
                 {
                     var index = Random.Range(0, FootstepAudioClips.Length);
-                    AudioSource.PlayClipAtPoint(FootstepAudioClips[index], transform.TransformPoint(_controller.center), FootstepAudioVolume);
+                    AudioSource.PlayClipAtPoint(FootstepAudioClips[index], transform.position, FootstepAudioVolume);
                 }
             }
         }
@@ -385,7 +454,7 @@ namespace StarterAssets
         {
             if (animationEvent.animatorClipInfo.weight > 0.5f)
             {
-                AudioSource.PlayClipAtPoint(LandingAudioClip, transform.TransformPoint(_controller.center), FootstepAudioVolume);
+                AudioSource.PlayClipAtPoint(LandingAudioClip, transform.position, FootstepAudioVolume);
             }
         }
     }
