@@ -325,15 +325,16 @@ namespace StarterAssets
                 _targetRotation = Mathf.Round(_targetRotation * 100.0f) / 100.0f;
                 Vector3 characterRotation = transform.localRotation.eulerAngles;
 
-                float currentAngle = Vector3.SignedAngle(transform.forward, cameraForward, transform.up);
+                float currentAngle = Vector3.SignedAngle(cameraForward, transform.forward, transform.up);
                 Debug.Log("Current : " + currentAngle);
-                float desiredAngle = Vector3.SignedAngle(transform.forward, localInputDirection, transform.up);
+                float desiredAngle = Vector3.SignedAngle(cameraForward, localInputDirection, transform.up);
                 Debug.Log("Desired : " +  desiredAngle);
-                float smoothAngle = Mathf.SmoothDampAngle(currentAngle, desiredAngle, ref _rotationVelocity, 100.0f);
-                Debug.Log("Smooth : " + smoothAngle);
-                transform.rotation = Quaternion.AngleAxis(desiredAngle, transform.up) * transform.rotation;
+                float smoothAngle = Mathf.SmoothDampAngle(currentAngle, desiredAngle, ref _rotationVelocity, RotationSmoothTime);
+                //Debug.Log("Smooth : " + smoothAngle);
+                float deltaRotation = smoothAngle - currentAngle;
+                transform.rotation = Quaternion.AngleAxis(deltaRotation, transform.up) * transform.rotation;
 
-                _cameraAdjustment = -desiredAngle;
+                _cameraAdjustment = -deltaRotation;
             }
 
 
