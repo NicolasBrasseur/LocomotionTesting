@@ -183,6 +183,8 @@ namespace StarterAssets
         {
             _hasAnimator = TryGetComponent(out _animator);
 
+            //transform.Rotate(0.0f, -5.0f * Time.deltaTime, 0.0f, Space.Self);
+
             JumpAndGravity();
             GroundedCheck();
             Move();
@@ -303,17 +305,12 @@ namespace StarterAssets
             Vector3 correctedInputDirection = UpVectorOffset * inputDirection;
             if (inputDirection != Vector3.zero) _inputCorrectedDebug = correctedInputDirection;
 
-            /*Vector3 correctedForwardDirection = UpVectorOffset * Vector3.forward;
-            Quaternion ForwardVectorOffset = Quaternion.FromToRotation(correctedForwardDirection, transform.forward).normalized;
-            float ForwardVectorOffsetAngle = ForwardVectorOffset.eulerAngles.y;
-            Vector3 localInputDirection = (Quaternion.AngleAxis(ForwardVectorOffsetAngle, transform.up) * correctedInputDirection).normalized;
-            if (inputDirection != Vector3.zero) _inputLocalDebug = localInputDirection;*/
-
             Vector3 cameraForward = Vector3.ProjectOnPlane(_mainCamera.transform.forward, transform.up);
+            Vector3 cameraRight = Vector3.ProjectOnPlane(_mainCamera.transform.right, transform.up);
             _cameraForwardDebug = cameraForward;
 
             Vector3 correctedForwardDirection = UpVectorOffset * Vector3.forward;
-            float ForwardVectorOffsetAngle = Vector3.SignedAngle(correctedForwardDirection, _startForward, transform.up); //cameraForward
+            float ForwardVectorOffsetAngle = Vector3.SignedAngle(correctedForwardDirection, cameraForward, transform.up); //cameraForward
 
             Vector3 localInputDirection = (Quaternion.AngleAxis(ForwardVectorOffsetAngle, transform.up) * correctedInputDirection).normalized;
             if (inputDirection != Vector3.zero) _inputLocalDebug = localInputDirection;
@@ -324,23 +321,19 @@ namespace StarterAssets
             // if there is a move input rotate player when the player is moving
             if (_input.move != Vector2.zero)
             {
-                //_targetRotation = Mathf.Atan2(localInputDirection.x, localInputDirection.z) * Mathf.Rad2Deg + _mainCamera.transform.localEulerAngles.y;
                 _targetRotation = Mathf.Atan2(localInputDirection.x, localInputDirection.z) * Mathf.Rad2Deg;
                 _targetRotation = Mathf.Round(_targetRotation * 100.0f) / 100.0f;
-                Debug.Log("Rotation : " + _targetRotation);
-                float rotation = Mathf.SmoothDampAngle(transform.localEulerAngles.y, _targetRotation, ref _rotationVelocity, RotationSmoothTime);
-
-                //float rotation = Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg + _mainCamera.transform.localEulerAngles.y;
-
-                // rotate to face input direction relative to camera position
                 Vector3 characterRotation = transform.localRotation.eulerAngles;
-                float cameraRotation = transform.localRotation.eulerAngles.y - rotation;
-                float cameraRotationUnit = cameraRotation / 360.0f;
-                float restrictedCameraRotation = Mathf.Round(((cameraRotationUnit - Mathf.Floor(cameraRotationUnit - 0.5f) - 1.0f) * 360.0f) * 100.0f) / 100.0f;
-                if(restrictedCameraRotation > 0 || restrictedCameraRotation < 0) Debug.LogWarning("Camera : " + restrictedCameraRotation);
-                transform.localRotation = Quaternion.Euler(characterRotation.x, rotation, characterRotation.z); //TODO: Fix rotation
 
-                _cameraAdjustment = restrictedCameraRotation;
+                float currentAngle = Vector3.SignedAngle(transform.forward, cameraForward, transform.up);
+                Debug.Log("Current : " + currentAngle);
+                float desiredAngle = Vector3.SignedAngle(transform.forward, localInputDirection, transform.up);
+                Debug.Log("Desired : " +  desiredAngle);
+                float smoothAngle = Mathf.SmoothDampAngle(currentAngle, desiredAngle, ref _rotationVelocity, 100.0f);
+                Debug.Log("Smooth : " + smoothAngle);
+                transform.rotation = Quaternion.AngleAxis(desiredAngle, transform.up) * transform.rotation;
+
+                _cameraAdjustment = -desiredAngle;
             }
 
 
@@ -457,7 +450,7 @@ namespace StarterAssets
             Gizmos.color = Color.yellow;
             Gizmos.DrawLine(transform.position, transform.position + _inputLocalDebug * 5.0f);
             Gizmos.color = Color.red;
-            Gizmos.DrawLine(transform.position, transform.position + transform.forward * 3.0f);
+            Gizmos.DrawLine(transform.position, transform.position + transform.up * 10.0f);
             Gizmos.color = Color.blue;
             Gizmos.DrawLine(transform.position, transform.position + _cameraForwardDebug * 3.0f);
         }
