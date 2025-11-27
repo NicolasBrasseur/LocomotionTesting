@@ -278,12 +278,12 @@ namespace StarterAssets
             float inputMagnitude = _input.analogMovement ? _input.move.magnitude : 1f;
 
             // accelerate or decelerate to target speed
-            if (currentHorizontalSpeed < targetSpeed - speedOffset ||
-                currentHorizontalSpeed > targetSpeed + speedOffset)
+            if (_speed < targetSpeed - speedOffset ||
+                _speed > targetSpeed + speedOffset)
             {
                 // creates curved result rather than a linear one giving a more organic speed change
                 // note T in Lerp is clamped, so we don't need to clamp our speed
-                _speed = Mathf.Lerp(currentHorizontalSpeed, targetSpeed * inputMagnitude,
+                _speed = Mathf.Lerp(_speed, targetSpeed * inputMagnitude,
                     Time.deltaTime * SpeedChangeRate);
 
                 // round speed to 3 decimal places
@@ -326,11 +326,8 @@ namespace StarterAssets
                 Vector3 characterRotation = transform.localRotation.eulerAngles;
 
                 float currentAngle = Vector3.SignedAngle(cameraForward, transform.forward, transform.up);
-                Debug.Log("Current : " + currentAngle);
                 float desiredAngle = Vector3.SignedAngle(cameraForward, localInputDirection, transform.up);
-                Debug.Log("Desired : " +  desiredAngle);
                 float smoothAngle = Mathf.SmoothDampAngle(currentAngle, desiredAngle, ref _rotationVelocity, RotationSmoothTime);
-                //Debug.Log("Smooth : " + smoothAngle);
                 float deltaRotation = smoothAngle - currentAngle;
                 transform.rotation = Quaternion.AngleAxis(deltaRotation, transform.up) * transform.rotation;
 
