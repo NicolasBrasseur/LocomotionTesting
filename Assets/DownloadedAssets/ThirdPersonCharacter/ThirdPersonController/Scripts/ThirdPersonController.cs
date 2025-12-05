@@ -22,6 +22,9 @@ namespace StarterAssets
         [Tooltip("Sprint speed of the character in m/s")]
         public float SprintSpeed = 5.335f;
 
+        [Tooltip("Minimum distance between the player and any object around it")]
+        [SerializeField] private float _skinWidth = 0.015f;
+
         [Tooltip("How fast the character turns to face movement direction")]
         [Range(0.0f, 0.3f)]
         public float RotationSmoothTime = 0.12f;
@@ -331,11 +334,32 @@ namespace StarterAssets
 
             void MovePlayer()
             {
-                Vector3 targetForwardDirection = cameraBasedInputDirection;
+                Vector3 targetForwardDirection = cameraBasedInputDirection.normalized;
                 Vector3 targetUpDirection = -LocalDown;
 
                 // move the player
-                transform.Translate(targetForwardDirection.normalized * (_speed * Time.deltaTime) + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
+                RaycastHit hit;
+                bool doHitObstacle = _rigidbody.SweepTest(targetForwardDirection, out hit, _speed * Time.deltaTime);
+
+                if(!doHitObstacle)
+                {
+                    transform.Translate(targetForwardDirection * (_speed * Time.deltaTime) + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
+                }
+                else
+                {
+                    float allowedTravelDistance = Mathf.Max(hit.distance - _skinWidth, 0.0f);
+                    float leftoverDistance = _speed * Time.deltaTime - allowedTravelDistance + _skinWidth;
+
+                    Vector3 finalForwardVector = targetForwardDirection * allowedTravelDistance;
+
+                    if (leftoverDistance > 0.0f)
+                    {
+                        Vector3 newForwardDirection = Vector3.ProjectOnPlane(targetForwardDirection * leftoverDistance, hit.normal);
+                        finalForwardVector += newForwardDirection;
+                    }
+
+                    transform.Translate(finalForwardVector + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
+                }
             }
         }
 
