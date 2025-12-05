@@ -123,7 +123,8 @@ namespace StarterAssets
         private StarterAssetsInputs _input;
         private GameObject _mainCamera;
 
-        private const float _threshold = 0.01f;
+        private const float THRESHOLD = 0.01f;
+        private const float MAX_COLLIDEANDSLIDE_ITERATION = 5;
 
         private bool _hasAnimator;
 
@@ -216,7 +217,7 @@ namespace StarterAssets
         private void CameraRotation()
         {
             // if there is an input and camera position is not fixed
-            if (_input.look.sqrMagnitude >= _threshold && !LockCameraPosition)
+            if (_input.look.sqrMagnitude >= THRESHOLD && !LockCameraPosition)
             {
                 //Don't multiply mouse input by Time.deltaTime;
                 float deltaTimeMultiplier = IsCurrentDeviceMouse ? 1.0f : Time.deltaTime;
@@ -337,28 +338,66 @@ namespace StarterAssets
                 Vector3 targetForwardDirection = cameraBasedInputDirection.normalized;
                 Vector3 targetUpDirection = -LocalDown;
 
-                // move the player
-                RaycastHit hit;
-                bool doHitObstacle = _rigidbody.SweepTest(targetForwardDirection, out hit, _speed * Time.deltaTime);
+                Vector3 forwardVector = CollideAndSlide(targetForwardDirection, _speed * Time.deltaTime);
 
-                if(!doHitObstacle)
+                transform.Translate(forwardVector + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
+
+
+                Vector3 CollideAndSlide(Vector3 desiredDirection, float desiredSpeed)
                 {
-                    transform.Translate(targetForwardDirection * (_speed * Time.deltaTime) + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
-                }
-                else
-                {
-                    float allowedTravelDistance = Mathf.Max(hit.distance - _skinWidth, 0.0f);
-                    float leftoverDistance = _speed * Time.deltaTime - allowedTravelDistance + _skinWidth;
+                    RaycastHit hit;
+                    bool doHitObstacle = false;
+                    Vector3 currentIterationDirection = desiredDirection;
+                    float currentIterationSpeed = desiredSpeed;
+                    Vector3 finalMovementVector = Vector3.zero;
+                    float currentIteration = 0;
 
-                    Vector3 finalForwardVector = targetForwardDirection * allowedTravelDistance;
-
-                    if (leftoverDistance > 0.0f)
+                    do
                     {
-                        Vector3 newForwardDirection = Vector3.ProjectOnPlane(targetForwardDirection * leftoverDistance, hit.normal);
-                        finalForwardVector += newForwardDirection;
-                    }
+                        currentIteration += 1;
 
-                    transform.Translate(finalForwardVector + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
+                        doHitObstacle = _rigidbody.SweepTest(currentIterationDirection, out hit, currentIterationSpeed);
+
+                        if (doHitObstacle)
+                        {
+                            // Separate the distance between before and after collision
+                            float allowedTravelDistance = Mathf.Max(hit.distance - _skinWidth, 0.0f);
+                            float leftoverDistance = currentIterationSpeed - allowedTravelDistance + _skinWidth;
+
+                            // Add this itteration distance to the total movement vector
+                            finalMovementVector = currentIterationDirection * allowedTravelDistance;
+
+                            if (leftoverDistance > 0.0f)
+                            {
+                                // Calculate the direction and distance when the player slide after the collision
+                                Vector3 newForwardDirection = Vector3.ProjectOnPlane(currentIterationDirection * leftoverDistance, hit.normal);
+
+                                // Test if the collided obstacle has a normal pointing downward
+                                if (Vector3.Dot(newForwardDirection.normalized, LocalDown) > 0.2f)
+                                {
+                                    // If so, remove the downward portion of the sliding by reprojecting the obstacle normal to be parallel with the ground
+                                    Vector3 projectedNormal = Vector3.ProjectOnPlane(hit.normal, -LocalDown).normalized;
+                                    newForwardDirection = Vector3.ProjectOnPlane(currentIterationDirection * leftoverDistance, projectedNormal);
+                                }
+
+                                // Set the slinding direction and speed to be the next iteration direction and speed to check for additionnal obstacles
+                                currentIterationDirection = newForwardDirection.normalized;
+                                currentIterationSpeed = newForwardDirection.magnitude;
+                            }
+                            else
+                            {
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            // If no other obstacles are detected, add the remaining movement vector to the total movement vector
+                            finalMovementVector += currentIterationDirection * currentIterationSpeed;
+                            break;
+                        }
+                    } while (doHitObstacle && currentIteration < MAX_COLLIDEANDSLIDE_ITERATION);
+
+                    return finalMovementVector;
                 }
             }
         }
