@@ -123,7 +123,8 @@ namespace StarterAssets
         private StarterAssetsInputs _input;
         private GameObject _mainCamera;
 
-        private const float _threshold = 0.01f;
+        private const float THRESHOLD = 0.01f;
+        private const float MAX_COLLIDEANDSLIDE_ITERATION = 5;
 
         private bool _hasAnimator;
 
@@ -216,7 +217,7 @@ namespace StarterAssets
         private void CameraRotation()
         {
             // if there is an input and camera position is not fixed
-            if (_input.look.sqrMagnitude >= _threshold && !LockCameraPosition)
+            if (_input.look.sqrMagnitude >= THRESHOLD && !LockCameraPosition)
             {
                 //Don't multiply mouse input by Time.deltaTime;
                 float deltaTimeMultiplier = IsCurrentDeviceMouse ? 1.0f : Time.deltaTime;
@@ -339,27 +340,64 @@ namespace StarterAssets
 
                 // move the player
                 RaycastHit hit;
-                bool doHitObstacle = _rigidbody.SweepTest(targetForwardDirection, out hit, _speed * Time.deltaTime);
+                bool doHitObstacle = false;
+                Vector3 currentIterationForwardDirection = targetForwardDirection;
+                float currentIterationForwardSpeed = _speed * Time.deltaTime;
+                Vector3 finalForwardVector = Vector3.zero;
+                float currentIteration = 0;
 
-                if(!doHitObstacle)
+                do
                 {
-                    transform.Translate(targetForwardDirection * (_speed * Time.deltaTime) + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
-                }
-                else
-                {
-                    float allowedTravelDistance = Mathf.Max(hit.distance - _skinWidth, 0.0f);
-                    float leftoverDistance = _speed * Time.deltaTime - allowedTravelDistance + _skinWidth;
+                    currentIteration += 1;
 
-                    Vector3 finalForwardVector = targetForwardDirection * allowedTravelDistance;
+                    doHitObstacle = _rigidbody.SweepTest(currentIterationForwardDirection, out hit, currentIterationForwardSpeed);
 
-                    if (leftoverDistance > 0.0f)
+                    if(doHitObstacle)
                     {
-                        Vector3 newForwardDirection = Vector3.ProjectOnPlane(targetForwardDirection * leftoverDistance, hit.normal);
-                        finalForwardVector += newForwardDirection;
-                    }
+                        float allowedTravelDistance = Mathf.Max(hit.distance - _skinWidth, 0.0f);
+                        float leftoverDistance = currentIterationForwardSpeed - allowedTravelDistance + _skinWidth;
 
-                    transform.Translate(finalForwardVector + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
-                }
+                        finalForwardVector = currentIterationForwardDirection * allowedTravelDistance;
+
+                        if (leftoverDistance > 0.0f)
+                        {
+                            Vector3 newForwardDirection = Vector3.ProjectOnPlane(targetForwardDirection * leftoverDistance, hit.normal);
+                            currentIterationForwardDirection = newForwardDirection.normalized;
+                            currentIterationForwardSpeed = newForwardDirection.magnitude;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        finalForwardVector += currentIterationForwardDirection * currentIterationForwardSpeed;
+                        break;
+                    }
+                } while (doHitObstacle && currentIteration < MAX_COLLIDEANDSLIDE_ITERATION);
+
+                transform.Translate(finalForwardVector + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
+
+                //if(!doHitObstacle)
+                //{
+                //    transform.Translate(targetForwardDirection * (_speed * Time.deltaTime) + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
+                //}
+                //else
+                //{
+                //    float allowedTravelDistance = Mathf.Max(hit.distance - _skinWidth, 0.0f);
+                //    float leftoverDistance = _speed * Time.deltaTime - allowedTravelDistance + _skinWidth;
+
+                //    Vector3 finalForwardVector = targetForwardDirection * allowedTravelDistance;
+
+                //    if (leftoverDistance > 0.0f)
+                //    {
+                //        Vector3 newForwardDirection = Vector3.ProjectOnPlane(targetForwardDirection * leftoverDistance, hit.normal);
+                //        finalForwardVector += newForwardDirection;
+                //    }
+
+                //    transform.Translate(finalForwardVector + targetUpDirection * _verticalVelocity * Time.deltaTime, Space.World);
+                //}
             }
         }
 
