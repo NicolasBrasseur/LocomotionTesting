@@ -357,6 +357,7 @@ namespace StarterAssets
                         currentIteration += 1;
 
                         doHitObstacle = _rigidbody.SweepTest(currentIterationDirection, out hit, currentIterationSpeed);
+                        if (doHitObstacle) { doHitObstacle = !hit.collider.isTrigger; }
 
                         if (doHitObstacle)
                         {
