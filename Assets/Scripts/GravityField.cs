@@ -11,7 +11,7 @@ public class GravityField : MonoBehaviour
     {
         if(other.TryGetComponent<ThirdPersonController>(out _controller))
         {
-            _controller.SetNewLocalDown(transform.up * -1.0f);
+            _controller.SetNewLocalDown(transform.up * -1.0f, true);
         }
     }
 
@@ -19,7 +19,17 @@ public class GravityField : MonoBehaviour
     {
         if(other.TryGetComponent<ThirdPersonController>(out _controller) && _resetGravityOnExit)
         {
-            _controller.SetNewLocalDown(Vector3.down);
+            _controller.SetNewLocalDown(Vector3.down, false);
+        }
+    }
+
+    private void OnTriggerStay(Collider other)
+    {
+        if (other.TryGetComponent<ThirdPersonController>(out _controller))
+        {
+            if(_controller.IsInGravityField) { return; }
+
+            _controller.SetNewLocalDown(transform.up * -1.0f, true);
         }
     }
 }

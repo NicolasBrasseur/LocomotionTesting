@@ -81,16 +81,20 @@ namespace StarterAssets
         [Tooltip("For locking the camera position on all axis")]
         public bool LockCameraPosition = false;
 
+        [Header("Local Gravity")]
+        [SerializeField] private float _gravitySwitchCooldown = 0.1f;
+        [SerializeField] private float _gravitySwitchSmoothDamp = 0.035f;
+
         //Custom members
+        public bool IsInGravityField = false;
         private Vector3 _localDown = Vector3.down;
         private Vector3 _localUp = Vector3.up;
-        [SerializeField] private bool _overwriteLocalDown = false;
         private Vector3 _previousLocation;
         private Vector3 _velocity;
         private Rigidbody _rigidbody;
         private Collider _collider;
         private float _cameraAdjustment;
-        private bool _isSwitchingGravity;
+        private bool _isInGravitySwitchCooldown;
 
         //Debug
         private Vector3 _inputDirectionDebug;
@@ -170,30 +174,29 @@ namespace StarterAssets
 #endif
 
             AssignAnimationIDs();
-
-            if(!_overwriteLocalDown)
-            {
-                SetNewLocalDown(transform.up * -1.0f);
-            }
+            SetNewLocalDown(transform.up * -1.0f);
 
             // reset our timeouts on start
             _jumpTimeoutDelta = JumpTimeout;
             _fallTimeoutDelta = FallTimeout;
 
             _previousLocation = transform.localPosition;
-            _isSwitchingGravity = false;
+            _isInGravitySwitchCooldown = false;
+            IsInGravityField = false;
         }
 
-        public void SetNewLocalDown(Vector3 newDownDirection)
+        public void SetNewLocalDown(Vector3 newDownDirection, bool isInGravityField = false)
         {
             if(newDownDirection == _localDown) { return; }
-            if(_isSwitchingGravity) { return; }
+            if(_isInGravitySwitchCooldown) { return; }
 
-            _isSwitchingGravity = true;
+            _isInGravitySwitchCooldown = true;
+            IsInGravityField = isInGravityField;
 
             _localDown = newDownDirection;
             _localUp = _localDown * -1.0f;
 
+            StopAllCoroutines();
             StartCoroutine(RotatePlayerGravity());
             _verticalVelocity = 0.0f;
         }
@@ -498,25 +501,26 @@ namespace StarterAssets
             Quaternion deltaRotation = Quaternion.FromToRotation(transform.up, _localUp);
             Quaternion currentRotation = transform.rotation;
             Quaternion thisIterationDeltaRotation = Quaternion.identity;
-            float ratio = 0.05f;
 
             int maxIteration = 500;
             int currentIteration = 0;
+
+            float startingTime = Time.time;
 
             while(deltaRotation != Quaternion.identity && currentIteration < maxIteration)
             {
                 deltaRotation = Quaternion.FromToRotation(transform.up, _localUp);
                 currentRotation = transform.rotation;
-                thisIterationDeltaRotation = Quaternion.Slerp(Quaternion.identity, deltaRotation, ratio);
+                thisIterationDeltaRotation = Quaternion.Slerp(Quaternion.identity, deltaRotation, _gravitySwitchSmoothDamp * Time.deltaTime * 100.0f);
                 RotateAroundPoint(transform, _collider.bounds.center, thisIterationDeltaRotation);
 
                 currentIteration++;
+                if((Time.time - startingTime) > _gravitySwitchCooldown && _isInGravitySwitchCooldown) { _isInGravitySwitchCooldown = false; }
                 yield return null;
             }
 
             deltaRotation = Quaternion.FromToRotation(transform.up, _localUp);
             RotateAroundPoint(transform, _collider.bounds.center, deltaRotation);
-            _isSwitchingGravity = false;
         }
 
         private static float ClampAngle(float lfAngle, float lfMin, float lfMax)
