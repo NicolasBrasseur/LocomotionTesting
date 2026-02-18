@@ -5,31 +5,32 @@ public class GravityField : MonoBehaviour
 {
     [SerializeField] private bool _resetGravityOnExit;
 
-    private ThirdPersonController _controller;
+    private CenterOfGravity _centerOfGravity;
 
     private void OnTriggerEnter(Collider other)
     {
-        if(other.TryGetComponent<ThirdPersonController>(out _controller))
+        Debug.Log($"Trigger : {other.name}");
+        if(other.TryGetComponent<CenterOfGravity>(out _centerOfGravity))
         {
-            _controller.SetNewLocalDown(transform.up * -1.0f, true);
+            _centerOfGravity.GetPlayerController().SetNewLocalDown(transform.up * -1.0f, true);
         }
     }
 
     private void OnTriggerExit(Collider other)
     {
-        if(other.TryGetComponent<ThirdPersonController>(out _controller) && _resetGravityOnExit)
+        if(other.TryGetComponent<CenterOfGravity>(out _centerOfGravity) && _resetGravityOnExit)
         {
-            _controller.SetNewLocalDown(Vector3.down, false);
+            _centerOfGravity.GetPlayerController().SetNewLocalDown(Vector3.down, false);
         }
     }
 
     private void OnTriggerStay(Collider other)
     {
-        if (other.TryGetComponent<ThirdPersonController>(out _controller))
+        if (other.TryGetComponent<CenterOfGravity>(out _centerOfGravity))
         {
-            if(_controller.IsInGravityField) { return; }
+            if(_centerOfGravity.GetPlayerController().IsInGravityField) { return; }
 
-            _controller.SetNewLocalDown(transform.up * -1.0f, true);
+            _centerOfGravity.GetPlayerController().SetNewLocalDown(transform.up * -1.0f, true);
         }
     }
 }
