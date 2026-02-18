@@ -1,6 +1,8 @@
-﻿using UnityEngine;
+﻿using System.Collections;
+using UnityEngine;
 #if ENABLE_INPUT_SYSTEM 
 using UnityEngine.InputSystem;
+using static UnityEditor.FilePathAttribute;
 #endif
 
 /* Note: animations are called via the controller for both the character and capsule using animator null checks
@@ -79,13 +81,20 @@ namespace StarterAssets
         [Tooltip("For locking the camera position on all axis")]
         public bool LockCameraPosition = false;
 
+        [Header("Local Gravity")]
+        [SerializeField] private float _gravitySwitchCooldown = 0.1f;
+        [SerializeField] private float _gravitySwitchSmoothDamp = 0.035f;
+
         //Custom members
-        public Vector3 LocalDown = Vector3.down;
-        [SerializeField] private bool _overwriteLocalDown = false;
+        public bool IsInGravityField = false;
+        private Vector3 _localDown = Vector3.down;
+        private Vector3 _localUp = Vector3.up;
         private Vector3 _previousLocation;
         private Vector3 _velocity;
         private Rigidbody _rigidbody;
+        private Collider _collider;
         private float _cameraAdjustment;
+        private bool _isInGravitySwitchCooldown;
 
         //Debug
         private Vector3 _inputDirectionDebug;
@@ -156,6 +165,7 @@ namespace StarterAssets
             
             _hasAnimator = TryGetComponent(out _animator);
             _rigidbody = GetComponent<Rigidbody>();
+            _collider = GetComponent<Collider>();
             _input = GetComponent<StarterAssetsInputs>();
 #if ENABLE_INPUT_SYSTEM 
             _playerInput = GetComponent<PlayerInput>();
@@ -164,17 +174,31 @@ namespace StarterAssets
 #endif
 
             AssignAnimationIDs();
-
-            if(!_overwriteLocalDown)
-            {
-                LocalDown = transform.up * -1.0f;
-            }
+            SetNewLocalDown(transform.up * -1.0f);
 
             // reset our timeouts on start
             _jumpTimeoutDelta = JumpTimeout;
             _fallTimeoutDelta = FallTimeout;
 
             _previousLocation = transform.localPosition;
+            _isInGravitySwitchCooldown = false;
+            IsInGravityField = false;
+        }
+
+        public void SetNewLocalDown(Vector3 newDownDirection, bool isInGravityField = false)
+        {
+            if(newDownDirection == _localDown) { return; }
+            if(_isInGravitySwitchCooldown) { return; }
+
+            _isInGravitySwitchCooldown = true;
+            IsInGravityField = isInGravityField;
+
+            _localDown = newDownDirection;
+            _localUp = _localDown * -1.0f;
+
+            StopAllCoroutines();
+            StartCoroutine(RotatePlayerGravity());
+            _verticalVelocity = 0.0f;
         }
 
         private void Update()
@@ -298,19 +322,19 @@ namespace StarterAssets
                 Vector3 absoluteInputDirection = new Vector3(_input.move.x, 0.0f, _input.move.y).normalized;
                 /* DEBUG */ if (absoluteInputDirection != Vector3.zero) _inputDirectionDebug = absoluteInputDirection;
 
-                Quaternion absoluteToLocalRotation = Quaternion.FromToRotation(Vector3.up, transform.up).normalized;
+                Quaternion absoluteToLocalRotation = Quaternion.FromToRotation(Vector3.up, _localUp).normalized;
                 Vector3 projectedInputDirection = absoluteToLocalRotation * absoluteInputDirection;
                 /* DEBUG */ if (absoluteInputDirection != Vector3.zero) _inputProjectedDebug = projectedInputDirection;
 
-                Vector3 projectedCameraForward = Vector3.ProjectOnPlane(_mainCamera.transform.forward, transform.up);
-                Vector3 projectedCameraRight = Vector3.ProjectOnPlane(_mainCamera.transform.right, transform.up);
+                Vector3 projectedCameraForward = Vector3.ProjectOnPlane(_mainCamera.transform.forward, _localUp);
+                Vector3 projectedCameraRight = Vector3.ProjectOnPlane(_mainCamera.transform.right, _localUp);
                 /* DEBUG */ _cameraForwardDebug = projectedCameraForward;
 
                 Vector3 projectedForwardDirection = absoluteToLocalRotation * Vector3.forward;
-                float projectedCameraAngle = Vector3.SignedAngle(projectedForwardDirection, projectedCameraForward, transform.up);
+                float projectedCameraAngle = Vector3.SignedAngle(projectedForwardDirection, projectedCameraForward, _localUp);
 
                 // Rotate the input direction based on the camera angle
-                cameraBasedInputDirection = (Quaternion.AngleAxis(projectedCameraAngle, transform.up) * projectedInputDirection).normalized;
+                cameraBasedInputDirection = (Quaternion.AngleAxis(projectedCameraAngle, _localUp) * projectedInputDirection).normalized;
                 /* DEBUG */ if (absoluteInputDirection != Vector3.zero) _inputCameraBasedDebug = cameraBasedInputDirection;
 
                 // note: Vector2's != operator uses approximation so is not floating point error prone, and is cheaper than magnitude
@@ -321,12 +345,12 @@ namespace StarterAssets
                     _targetRotation = Mathf.Atan2(cameraBasedInputDirection.x, cameraBasedInputDirection.z) * Mathf.Rad2Deg;
                     _targetRotation = Mathf.Round(_targetRotation * 1000.0f) / 1000.0f;
 
-                    float currentAngle = Vector3.SignedAngle(projectedCameraForward, transform.forward, transform.up);
-                    float desiredAngle = Vector3.SignedAngle(projectedCameraForward, cameraBasedInputDirection, transform.up);
+                    float currentAngle = Vector3.SignedAngle(projectedCameraForward, transform.forward, _localUp);
+                    float desiredAngle = Vector3.SignedAngle(projectedCameraForward, cameraBasedInputDirection, _localUp);
                     float smoothAngle = Mathf.SmoothDampAngle(currentAngle, desiredAngle, ref _rotationVelocity, RotationSmoothTime);
                     float deltaRotation = smoothAngle - currentAngle;
 
-                    transform.rotation = Quaternion.AngleAxis(deltaRotation, transform.up) * transform.rotation;
+                    transform.rotation = Quaternion.AngleAxis(deltaRotation, _localUp) * transform.rotation;
 
                     // Rotate camera in the opposite direction to counter-balance player rotation
                     _cameraAdjustment = -deltaRotation;
@@ -336,7 +360,7 @@ namespace StarterAssets
             void MovePlayer()
             {
                 Vector3 targetForwardDirection = cameraBasedInputDirection.normalized;
-                Vector3 targetUpDirection = -LocalDown;
+                Vector3 targetUpDirection = _localUp;
 
                 Vector3 forwardVector = CollideAndSlide(targetForwardDirection, _speed * Time.deltaTime);
 
@@ -357,6 +381,7 @@ namespace StarterAssets
                         currentIteration += 1;
 
                         doHitObstacle = _rigidbody.SweepTest(currentIterationDirection, out hit, currentIterationSpeed);
+                        if (doHitObstacle) { doHitObstacle = !hit.collider.isTrigger; }
 
                         if (doHitObstacle)
                         {
@@ -373,10 +398,10 @@ namespace StarterAssets
                                 Vector3 newForwardDirection = Vector3.ProjectOnPlane(currentIterationDirection * leftoverDistance, hit.normal);
 
                                 // Test if the collided obstacle has a normal pointing downward
-                                if (Vector3.Dot(newForwardDirection.normalized, LocalDown) > 0.2f)
+                                if (Vector3.Dot(newForwardDirection.normalized, _localDown) > 0.2f)
                                 {
                                     // If so, remove the downward portion of the sliding by reprojecting the obstacle normal to be parallel with the ground
-                                    Vector3 projectedNormal = Vector3.ProjectOnPlane(hit.normal, -LocalDown).normalized;
+                                    Vector3 projectedNormal = Vector3.ProjectOnPlane(hit.normal, -_localDown).normalized;
                                     newForwardDirection = Vector3.ProjectOnPlane(currentIterationDirection * leftoverDistance, projectedNormal);
                                 }
 
@@ -471,11 +496,44 @@ namespace StarterAssets
             }
         }
 
+        IEnumerator RotatePlayerGravity()
+        {
+            Quaternion deltaRotation = Quaternion.FromToRotation(transform.up, _localUp);
+            Quaternion currentRotation = transform.rotation;
+            Quaternion thisIterationDeltaRotation = Quaternion.identity;
+
+            int maxIteration = 500;
+            int currentIteration = 0;
+
+            float startingTime = Time.time;
+
+            while(deltaRotation != Quaternion.identity && currentIteration < maxIteration)
+            {
+                deltaRotation = Quaternion.FromToRotation(transform.up, _localUp);
+                currentRotation = transform.rotation;
+                thisIterationDeltaRotation = Quaternion.Slerp(Quaternion.identity, deltaRotation, _gravitySwitchSmoothDamp * Time.deltaTime * 100.0f);
+                RotateAroundPoint(transform, _collider.bounds.center, thisIterationDeltaRotation);
+
+                currentIteration++;
+                if((Time.time - startingTime) > _gravitySwitchCooldown && _isInGravitySwitchCooldown) { _isInGravitySwitchCooldown = false; }
+                yield return null;
+            }
+
+            deltaRotation = Quaternion.FromToRotation(transform.up, _localUp);
+            RotateAroundPoint(transform, _collider.bounds.center, deltaRotation);
+        }
+
         private static float ClampAngle(float lfAngle, float lfMin, float lfMax)
         {
             if (lfAngle < -360f) lfAngle += 360f;
             if (lfAngle > 360f) lfAngle -= 360f;
             return Mathf.Clamp(lfAngle, lfMin, lfMax);
+        }
+
+        private void RotateAroundPoint(Transform rotatingTransform, Vector3 pivotPoint, Quaternion rotation)
+        {
+            rotatingTransform.position = rotation * (rotatingTransform.position - pivotPoint) + pivotPoint;
+            rotatingTransform.rotation = rotation * rotatingTransform.rotation;
         }
 
         private void OnDrawGizmosSelected()
